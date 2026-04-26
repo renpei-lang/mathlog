@@ -228,7 +228,15 @@ elif menu == "新規問題登録":
 # 3. 問題一覧・復習
 elif menu == "問題一覧・復習":
     st.header("🔍 問題一覧と復習記録")
+    # 問題一覧を表示して、チェックを入れたものを削除する例
+    st.subheader("問題の整理")
+    selected_indices = st.multiselect("削除したい問題を選択してください", df.index)
 
+    if st.button("選択した問題を削除"):
+        df = df.drop(selected_indices)
+        df.to_csv("problems.csv", index=False) # ファイル名は自分のものに合わせてください
+        st.success("削除しました！反映されるまで少し時間がかかる場合があります。")
+        st.rerun()
 
     
     conn = sqlite3.connect('math_study.db')
