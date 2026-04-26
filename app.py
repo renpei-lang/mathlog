@@ -5,18 +5,18 @@ import datetime
 
 
 import sqlite3
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 def get_notification_count(conn):
     # 「2日前」の日付を取得
-    two_days_ago = (datetime.date.today() - datetime.timedelta(days=2)).strftime('%Y-%m-%d')
+    two_days_ago = (date.today() - timedelta(days=2)).strftime('%Y-%m-%d')
     c = conn.cursor()
     
     # 2日前に解いて、かつ結果が「○」ではない問題をカウント
     # (同じ日に複数回解いている可能性も考慮して、その日の最新の結果を見ます)
     query = """
         SELECT COUNT(DISTINCT problem_id) 
-        FROM results 
-        WHERE date = ? AND result IN ('×', '△', '不明')
+        FROM records 
+        WHERE solve_date = ? AND understanding IN ('×', '△', '不明')
     """
     c.execute(query, (two_days_ago,))
     return c.fetchone()[0]
@@ -171,6 +171,15 @@ with st.sidebar:
 # 1. ホーム（統計表示）
 if menu == "ホーム":
     conn = sqlite3.connect('math_study.db')
+    
+    # 👇ここから追加：2日前の復習通知👇
+    review_count = get_notification_count(conn)
+    if review_count > 0:
+        st.warning(f"🚨 **復習のタイミングです！**\n\n2日前に「×」「△」「不明」だった問題が **{review_count}問** あります。「問題一覧・復習」からもう一度解き直してみましょう！")
+    else:
+        st.info("✨ 現在、2日前に間違えた要復習問題はありません。順調です！")
+    # 👆追加ここまで👆
+
     df_records = pd.read_sql_query("SELECT * FROM records", conn)
     conn.close()
     
@@ -183,6 +192,8 @@ if menu == "ホーム":
         st.metric("今日の勉強時間", f"{today_data['time_taken'].sum()} 分")
     with col2:
         st.metric("累計勉強時間", f"{df_records['time_taken'].sum()} 分")
+
+# 2. 新規問題登録 (これ以降はそのまま)
 
 # 2. 新規問題登録
 elif menu == "新規問題登録":
@@ -229,8 +240,6 @@ elif menu == "新規問題登録":
 elif menu == "問題一覧・復習":
     st.header("🔍 問題一覧と復習記録")
     
-
-    
     conn = sqlite3.connect('math_study.db')
     df_p = pd.read_sql_query("SELECT id, university, year, unit, difficulty, est_time FROM problems", conn)
     
@@ -258,18 +267,17 @@ elif menu == "問題一覧・復習":
                 with st.form(f"edit_form_{row['id']}"):
                     st.write("変更したい箇所を書き換えて「更新」を押してください")
                     
-                    # 今のデータを初期値として入れておく
                     edit_unit = st.text_input("単元", value=row['unit'])
                     edit_diff = st.text_input("難易度", value=row['difficulty'])
                     edit_summary = st.text_area("解答要素のまとめ", value=p_data[1], height=150)
                     
                     if st.form_submit_button("🔄 情報を更新する"):
-                        # データベースを上書きするSQLコマンド
                         c.execute("UPDATE problems SET unit=?, difficulty=?, summary=? WHERE id=?", 
                                   (edit_unit, edit_diff, edit_summary, row['id']))
                         conn.commit()
                         st.success("更新しました！")
-                        st.rerun() # 画面をリロードして即座に反映
+                        st.rerun() 
+            
             # 過去の記録
             st.subheader("解いた記録")
             df_r = pd.read_sql_query(f"SELECT solve_date, time_taken, understanding FROM records WHERE problem_id={row['id']}", conn)
@@ -293,4 +301,23 @@ elif menu == "問題一覧・復習":
                           (row['id'], u_date.strftime("%Y-%m-%d"), u_time, u_und, ans_bytes))
                 conn.commit()
                 st.rerun()
+
+            # 👇ここから追加：削除機能👇
+            st.divider()
+            with st.expander("🗑️ この問題を削除する"):
+                st.warning("⚠️ 一度削除すると、問題データも解いた記録もすべて消えます（元に戻せません）。")
+                # 間違えて押さないように、赤いボタン（type="primary"）にしています
+                if st.button("本当にこの問題を削除する", type="primary", key=f"delete_btn_{row['id']}"):
+                    c = conn.cursor()
+                    # 安全のため、問題に紐づく「解いた記録(records)」を先に消す
+                    c.execute("DELETE FROM records WHERE problem_id=?", (row['id'],))
+                    # その後、問題自体(problems)を消す
+                    c.execute("DELETE FROM problems WHERE id=?", (row['id'],))
+                    conn.commit()
+                    st.success("問題を削除しました！画面を更新します。")
+                    st.rerun()
+            # 👆追加ここまで👆
+
     conn.close()
+
+# 4. 分析ダッシュボード (もし続きがあればそのまま残してください)
